@@ -51,6 +51,30 @@ body{
 }
 .period-chip b{ color:var(--accent); font-weight:700; }
 
+.topbar-right{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+.blind-toggle{ display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none; }
+.blind-toggle-label{ font-family:var(--mono); font-size:12.5px; color:var(--ink-soft); font-weight:600; }
+.switch{ position:relative; display:inline-block; width:38px; height:22px; }
+.switch input{ opacity:0; width:0; height:0; }
+.slider{
+  position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0;
+  background:var(--line); transition:.15s; border-radius:22px;
+}
+.slider::before{
+  position:absolute; content:""; height:16px; width:16px; left:3px; bottom:3px;
+  background:#fff; transition:.15s; border-radius:50%; box-shadow:0 1px 2px rgba(0,0,0,.2);
+}
+.switch input:checked + .slider{ background:var(--accent); }
+.switch input:checked + .slider::before{ transform:translateX(16px); }
+
+.blind-cell{ }
+.blind-swatch{ display:inline-block; width:52px; height:11px; border-radius:2px; background:var(--panel); vertical-align:middle; }
+.summary-strip .blind-swatch, .meta-row .blind-swatch{ background:var(--bg); width:46px; }
+.catdd-item .blind-swatch{ background:var(--panel); width:40px; }
+.rank-col{ text-align:center !important; color:var(--ink-soft); width:44px; }
+thead th.rank-col{ cursor:default; }
+thead th.rank-col:hover{ background:var(--ink); }
+
 .meta-row{
   display:flex; gap:28px; padding:14px 0 22px; flex-wrap:wrap;
   font-family:var(--mono); font-size:12px; color:var(--ink-soft);
@@ -227,7 +251,16 @@ tbody td.term-cell{ font-weight:600; }
       <div class="brand-eyebrow">Gangnam Unni · Growth Analytics</div>
       <div class="brand-title">검색어 성과 대시보드</div>
     </div>
-    <div class="period-chip">기간 : <b>2026-05-01</b> ~ <b>2026-07-31</b></div>
+    <div class="topbar-right">
+      <div class="period-chip">기간 : <b>2026-05-01</b> ~ <b>2026-07-31</b></div>
+      <label class="blind-toggle" id="blindToggleWrap">
+        <span class="blind-toggle-label">병원미팅 시</span>
+        <span class="switch">
+          <input type="checkbox" id="blindToggle">
+          <span class="slider"></span>
+        </span>
+      </label>
+    </div>
   </div>
 
   <div class="meta-row" id="metaRow"></div>
@@ -311,16 +344,19 @@ const RAW = [["제모","제모",174805,162732,142510,84.02,0.9309,0.4076,0.5446,
 const COLS = [
   {key:0,  label:'검색어',              type:'str',  cls:'col-str term-cell'},
   {key:1,  label:'카테고리',            type:'cat',  cls:'col-str'},
-  {key:2,  label:'총 검색 수',          type:'int',  cls:'', bar:true},
-  {key:3,  label:'총 클릭 수',          type:'int',  cls:''},
-  {key:4,  label:'unique 클릭수',       type:'int',  cls:''},
-  {key:5,  label:'노출 이벤트 평균',    type:'float',cls:''},
+  {key:2,  label:'총 검색 수',          type:'int',  cls:'', bar:true, absolute:true},
+  {key:3,  label:'총 클릭 수',          type:'int',  cls:'', absolute:true},
+  {key:4,  label:'unique 클릭수',       type:'int',  cls:'', absolute:true},
+  {key:5,  label:'노출 이벤트 평균',    type:'float',cls:'', absolute:true},
   {key:6,  label:'클릭률',              type:'pct',  cls:''},
   {key:7,  label:'QCTR',                type:'pct',  cls:''},
   {key:8,  label:'mAP20',               type:'pct',  cls:''},
-  {key:9,  label:'상담신청 수',         type:'int',  cls:''},
+  {key:9,  label:'상담신청 수',         type:'int',  cls:'', absolute:true},
   {key:10, label:'CVR',                 type:'pct',  cls:''},
 ];
+
+let blindMode = false;
+const BLIND_PLACEHOLDER = '<span class="blind-swatch"></span>';
 
 const records = RAW.map(r => ({ raw:r, id:Math.random() }));
 
@@ -339,6 +375,10 @@ const maxSearches = Math.max(...records.map(r=>r.raw[2]));
 /* ---------------- generic table renderer ---------------- */
 function buildHead(theadRow, state, onSort){
   theadRow.innerHTML = '';
+  const rankTh = document.createElement('th');
+  rankTh.className = 'col-str rank-col';
+  rankTh.textContent = '순위';
+  theadRow.appendChild(rankTh);
   COLS.forEach(col=>{
     const th = document.createElement('th');
     th.className = col.cls;
@@ -353,14 +393,21 @@ function buildHead(theadRow, state, onSort){
 function renderRows(tbody, rows){
   tbody.innerHTML = '';
   const frag = document.createDocumentFragment();
-  rows.forEach(rec=>{
+  rows.forEach((rec, idx)=>{
     const r = rec.raw;
     const tr = document.createElement('tr');
+    const rankTd = document.createElement('td');
+    rankTd.className = 'col-str rank-col';
+    rankTd.textContent = idx + 1;
+    tr.appendChild(rankTd);
     COLS.forEach(col=>{
       const td = document.createElement('td');
       td.className = col.cls;
       const v = r[col.key];
-      if(col.type==='cat'){
+      if(blindMode && col.absolute){
+        td.classList.add('blind-cell');
+        td.innerHTML = BLIND_PLACEHOLDER;
+      } else if(col.type==='cat'){
         td.innerHTML = '<span class="cat-pill">' + v + '</span>';
       } else if(col.bar){
         const pct = Math.max(2, (v / maxSearches) * 100);
@@ -451,7 +498,7 @@ function renderCatddList(){
     item.innerHTML = `
       <input type="checkbox" ${checked?'checked':''} data-cat="${c.name}">
       <span class="cd-name">${c.name}</span>
-      <span class="cd-count">${c.count.toLocaleString('ko-KR')}개 · ${fmtInt(c.searches)}</span>
+      <span class="cd-count">${c.count.toLocaleString('ko-KR')}개 · ${blindMode ? BLIND_PLACEHOLDER : fmtInt(c.searches)}</span>
     `;
     item.querySelector('input').addEventListener('change', (e)=>{
       if(e.target.checked) selectedCats.add(c.name); else selectedCats.delete(c.name);
@@ -502,12 +549,13 @@ function renderSummaryStrip(rows){
   const totalSearches = rows.reduce((s,r)=>s+r.raw[2],0);
   const totalClicks = rows.reduce((s,r)=>s+r.raw[3],0);
   const totalConsult = rows.reduce((s,r)=>s+r.raw[9],0);
-  const cvr = totalSearches ? totalConsult/totalSearches : 0;
+  const cvr = totalClicks ? totalConsult/totalClicks : 0;
+  const bv = (v)=> blindMode ? BLIND_PLACEHOLDER : fmtInt(v);
   document.getElementById('catSummaryStrip').innerHTML = `
     <span class="sitem"><b>${rows.length.toLocaleString('ko-KR')}</b>개 검색어</span>
-    <span class="sitem"><b>${fmtInt(totalSearches)}</b> 총 검색 수</span>
-    <span class="sitem"><b>${fmtInt(totalClicks)}</b> 총 클릭 수</span>
-    <span class="sitem"><b>${fmtInt(totalConsult)}</b> 상담신청 수</span>
+    <span class="sitem"><b>${bv(totalSearches)}</b> 총 검색 수</span>
+    <span class="sitem"><b>${bv(totalClicks)}</b> 총 클릭 수</span>
+    <span class="sitem"><b>${bv(totalConsult)}</b> 상담신청 수</span>
     <span class="sitem"><b>${fmtPct(cvr)}</b> CVR</span>
   `;
 }
@@ -563,18 +611,29 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
 });
 
 /* ---------------- meta row ---------------- */
-(function(){
+function renderMetaRow(){
   const totalSearches = records.reduce((s,r)=>s+r.raw[2],0);
   const totalClicks = records.reduce((s,r)=>s+r.raw[3],0);
   const totalConsult = records.reduce((s,r)=>s+r.raw[9],0);
+  const bv = (v)=> blindMode ? BLIND_PLACEHOLDER : fmtInt(v);
   document.getElementById('metaRow').innerHTML = `
     <span class="stat"><b>${records.length.toLocaleString('ko-KR')}</b>개 검색어</span>
     <span class="stat"><b>${catList.length}</b>개 카테고리</span>
-    <span class="stat"><b>${fmtInt(totalSearches)}</b> 총 검색 수</span>
-    <span class="stat"><b>${fmtInt(totalClicks)}</b> 총 클릭 수</span>
-    <span class="stat"><b>${fmtInt(totalConsult)}</b> 상담신청 수</span>
+    <span class="stat"><b>${bv(totalSearches)}</b> 총 검색 수</span>
+    <span class="stat"><b>${bv(totalClicks)}</b> 총 클릭 수</span>
+    <span class="stat"><b>${bv(totalConsult)}</b> 상담신청 수</span>
   `;
-})();
+}
+renderMetaRow();
+
+/* ---------------- 병원미팅 시 blind toggle ---------------- */
+document.getElementById('blindToggle').addEventListener('change', (e)=>{
+  blindMode = e.target.checked;
+  renderMetaRow();
+  renderPage1();
+  renderPage2();
+  renderHiPage();
+});
 
 renderPage1();
 renderPage2();
@@ -584,11 +643,11 @@ const HI_DATA = [{"cat":"피부","n_total":140,"ctr_p70":1.407,"cvr_mean":0.0353
 
 const HI_COLS = [
   {label:'검색어', type:'str', cls:'col-str term-cell'},
-  {label:'총 검색 수', type:'int', cls:''},
-  {label:'총 클릭 수', type:'int', cls:''},
+  {label:'총 검색 수', type:'int', cls:'', absolute:true},
+  {label:'총 클릭 수', type:'int', cls:'', absolute:true},
   {label:'클릭률', type:'ratio', cls:''},
   {label:'CVR', type:'pct2', cls:''},
-  {label:'상담신청 수', type:'int', cls:''},
+  {label:'상담신청 수', type:'int', cls:'', absolute:true},
 ];
 
 function fmtRatio(n){ return n.toFixed(2); }
@@ -619,6 +678,10 @@ function renderHiPage(){
       const table = document.createElement('table');
       const thead = document.createElement('thead');
       const trh = document.createElement('tr');
+      const rankTh = document.createElement('th');
+      rankTh.className = 'col-str rank-col';
+      rankTh.textContent = '순위';
+      trh.appendChild(rankTh);
       HI_COLS.forEach(c=>{
         const th = document.createElement('th');
         th.className = c.cls;
@@ -627,14 +690,23 @@ function renderHiPage(){
       });
       thead.appendChild(trh);
       const tbody = document.createElement('tbody');
-      block.qual.forEach(row=>{
+      block.qual.forEach((row, idx)=>{
         const tr = document.createElement('tr');
+        const rankTd = document.createElement('td');
+        rankTd.className = 'col-str rank-col';
+        rankTd.textContent = idx + 1;
+        tr.appendChild(rankTd);
         const [term, searches, clicks, ctr, cvr, consult] = row;
         const vals = [term, fmtInt(searches), fmtInt(clicks), fmtRatio(ctr), fmtPct(cvr), fmtInt(consult)];
         HI_COLS.forEach((c,i)=>{
           const td = document.createElement('td');
           td.className = c.cls;
-          td.textContent = vals[i];
+          if(blindMode && c.absolute){
+            td.classList.add('blind-cell');
+            td.innerHTML = BLIND_PLACEHOLDER;
+          } else {
+            td.textContent = vals[i];
+          }
           tr.appendChild(td);
         });
         tbody.appendChild(tr);
